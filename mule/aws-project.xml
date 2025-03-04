@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:sqs="http://www.mulesoft.org/schema/mule/sqs" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/sqs http://www.mulesoft.org/schema/mule/sqs/current/mule-sqs.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+	<sqs:config name="Amazon_SQS_Configuration" doc:name="Amazon SQS Configuration" doc:id="5afcecd6-11fb-4df1-8696-5b13e58ba334" >
+		<sqs:basic-connection testQueueArn="arn:aws:sqs:eu-north-1:843981437160:book-management-system" accessKey="AKIA4JAJWXDUDZY4KCP4" secretKey="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" region="eu-north-1" />
+	</sqs:config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="f09c8987-2f64-4ec1-8d64-f6ab9b6bad5c" >
+		<db:generic-connection url="jdbc:h2:tcp://localhost/~/book_store" driverClassName="org.h2.Driver" user="sa" />
+	</db:config>
+	<sqs:config name="Amazon_SQS_Configuration1" doc:name="Amazon SQS Configuration" doc:id="5a07e129-bfd2-4bb1-9ed9-566a51f6b25d" >
+		<sqs:basic-connection testQueueArn="arn:aws:sqs:eu-north-1:843981437160:nafza_purchase" accessKey="AKIA4JAJWXDUDZY4KCP4" secretKey="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" region="eu-north-1"/>
+	</sqs:config>
+	<sqs:config name="Amazon_SQS_Configuration2" doc:name="Amazon SQS Configuration" doc:id="a8d20ebb-abcb-4442-a6a9-39640af89cb8" >
+		<sqs:basic-connection testQueueArn="arn:aws:sqs:eu-north-1:843981437160:nafza" accessKey="AKIA4JAJWXDUDZY4KCP4" secretKey="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" region="eu-north-1" />
+	</sqs:config>
+	<flow name="restock" doc:id="fd7ffee4-e8ad-4213-88b1-9904f09cf967" >
+		<sqs:receivemessages doc:name="Receive messages" doc:id="b6421ce6-614e-464e-b99e-b4a570a008a8" config-ref="Amazon_SQS_Configuration1" queueUrl="https://sqs.eu-north-1.amazonaws.com/843981437160/nafza_purchase"/>
+		<logger level="INFO" doc:name="Logger" doc:id="a1b42d46-0d0a-4d33-b4d3-ac89a65a92ad" message="#[payload]"/>
+		<ee:transform doc:name="Transform Message" doc:id="7cc810ab-3273-40e3-8738-eddd4fdeb5ca" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var jsonPayload = read(payload, "application/json") // Explicitly parse the payload
+---
+{
+    "id": jsonPayload.id as Number,
+    "restockQuantity": jsonPayload.restockQuantity as Number
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable value="#[payload.id as Number]" doc:name="Set Variable" doc:id="6443f825-5139-4e32-af71-a0214e155668" variableName="id"/>
+		<set-variable value="#[payload.restockQuantity as Number]" doc:name="Set Variable" doc:id="9f87cf45-5cd4-4b85-bc09-fcbd99fc1bad" variableName="restockQty"/>
+		<db:select doc:name="Select" doc:id="139d4151-4dbc-4767-8f7a-bd183c1826b2" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT * FROM books WHERE id = :id;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	id: vars.id
+}]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="Choice" doc:id="7db3cc0a-c9ec-410e-8339-cddbd7983b1d" >
+			<when expression="sizeOf(payload) &gt; 0">
+				<logger level="INFO" doc:name="Logger" doc:id="aa94d001-cd09-4758-9e76-52c97c0dfdac" message="Book exists. Proceeding with restock"/>
+			</when>
+			<otherwise >
+				<raise-error doc:name="Raise error" doc:id="b52eb725-0912-4fce-a8f0-bcfdab043efe" type="CUSTOM:NOT_FOUND"/>
+				<logger level="INFO" doc:name="Logger" doc:id="b6cc0f5f-7c53-476f-af27-23245370a83f" message="BOOK not found restock failed"/>
+			</otherwise>
+		</choice>
+		<logger level="INFO" doc:name="Logger" doc:id="7978d792-dfef-40b2-bba9-8f5a313eccd4" message="#[payload.restockQuantity]"/>
+		<db:update doc:name="Update" doc:id="26e07680-c06f-4e60-9c2a-ddecc708a17c" config-ref="Database_Config">
+			<db:sql ><![CDATA[UPDATE books SET quantity = quantity + :restockQuantity WHERE id = :id;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+     id: vars.id as Number,
+     restockQuantity: vars.restockQty as Number
+}]]]></db:input-parameters>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="66b50b66-389f-4040-94ba-786af8891c2d" message='"Restock successful. New quantity updated for book ID: " #[vars.id]'/>
+	</flow>
+	<flow name="purchase" doc:id="2b35c7ae-455c-48fd-92c0-c835740cf78d" >
+		<sqs:receivemessages doc:name="Receive messages" doc:id="cff662c5-bc01-46d0-a386-8840cfff6da0" config-ref="Amazon_SQS_Configuration2" queueUrl="https://sqs.eu-north-1.amazonaws.com/843981437160/nafza"/>
+		<ee:transform doc:name="Transform Message" doc:id="2abce857-e3b2-4e4e-90e6-53ab2650d0ef" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var jsonPayload = read(payload, "application/json")
+---
+{
+    "id": jsonPayload.id,
+    "quantity": jsonPayload.quantity
+    
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable value="#[payload.id]" doc:name="Set Variable" doc:id="80822a13-42f6-44c8-a32c-ee3a34d81682" variableName="id"/>
+		<set-variable value="#[payload.quantity]" doc:name="Set Variable" doc:id="d32e63f8-31e0-467d-9773-0090ac4651cd" variableName="purchaseQty"/>
+		<logger level="INFO" doc:name="Logger" doc:id="1613e9dd-cf43-4f14-ae98-73b27ae59f89" message="Querying database for book ID: #[vars.id]"/>
+		<db:select doc:name="Select" doc:id="f3d8ef9d-c624-4eb7-ad7a-306fad74d0db" config-ref="Database_Config">
+			<db:sql ><![CDATA[select * from books where id= :id;]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	id: vars.id
+}]]]></db:input-parameters>
+		</db:select>
+		<logger level="INFO" doc:name="Logger" doc:id="e5e77946-f396-4a97-bbf3-47a162aec2cc" message="#[payload]"/>
+		<ee:transform doc:name="Transform Message" doc:id="438b1224-10ca-4639-8ece-ddb59ca0e1b6" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var books = payload
+---
+books map ((book) -> {
+                "id": book.id,
+                "quantity": book.QUANTITY
+                
+            })]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<choice doc:name="Choice" doc:id="c214c4bd-4ee5-4515-a134-b5f93ac5d714" >
+			<when expression="payload[0].quantity&gt;=vars.purchaseQty">
+				<logger level="INFO" doc:name="Logger" doc:id="eca3b2a3-5128-41e0-85cc-ef60087f3c2c" message='"Sufficient Quantity Aavailable go with the purchase " #[payload.quantity]'/>
+			</when>
+			<otherwise >
+				<raise-error doc:name="Raise error" doc:id="5185e816-b823-4e08-b829-125a2fc95f0b" type="CUSTOM: NOT_FOUND"/>
+				<logger level="INFO" doc:name="Logger" doc:id="730e6ec3-03c5-4171-bf7d-07d182efbb99" message="Book not available flow stopped"/>
+			</otherwise>
+		</choice>
+		<logger level="INFO" doc:name="Logger" doc:id="88e7188d-cf45-4061-bb48-5835efcd6111" message="#[payload.quantity]"/>
+		<db:update doc:name="Update" doc:id="ecfbfe5b-652a-4a0d-a276-704e8a1808fc" config-ref="Database_Config">
+			<db:sql ><![CDATA[UPDATE books SET quantity = quantity - :purchaseQuantity
+WHERE id = :id AND quantity >= :purchaseQuantity
+ ]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	id: vars.id as Number,
+	purchaseQuantity: vars.purchaseQty
+}]]]></db:input-parameters>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="efe206d7-2645-4b82-856d-59e2f85fd3a1" message="#[payload]"/>
+		<logger level="INFO" doc:name="Logger" doc:id="4bc5c5e2-14fa-4ec0-9909-1c51ad534a81" message="book is reduced in database table"/>
+	</flow>
+	<flow name="aws-projectFlow1" doc:id="9e9586f4-495f-4658-a0a8-05910a5bdeef" >
+		<sqs:receivemessages doc:name="Receive messages" doc:id="8db25d5f-9390-4edc-8f33-b3d198ca5b1b" config-ref="Amazon_SQS_Configuration" queueUrl="https://sqs.eu-north-1.amazonaws.com/843981437160/BookInventory"/>
+		<logger level="INFO" doc:name="Logger" doc:id="8e7c9683-80f6-465c-ac1b-6c15602c05a1" message="#[payload]"/>
+		<ee:transform doc:name="Transform Message" doc:id="06291bec-e926-438e-aa61-022b7dfb5418" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="34557184-688e-4cd7-bf02-03ebf839dac0" message="message received"/>
+		<db:update doc:name="Update" doc:id="f8d7b100-3aa0-4d25-aa7e-27abb4856aa4" config-ref="Database_Config">
+			<db:sql><![CDATA[UPDATE books
+SET QUANTITY = 50
+WHERE ID = 1;]]></db:sql>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="9b7d503f-a952-4302-8cf1-3b20d1ca136b" message="message updated"/>
+	</flow>
+</mule>
